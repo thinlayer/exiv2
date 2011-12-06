@@ -1,5 +1,16 @@
 require 'exiv2'
 require 'fileutils'
+require 'rational'
+
+def rational(a, b)
+  # 1.8
+  return Rational.new!(a, b) if Rational.respond_to? :"new!"
+  # 1.9+
+  return Rational(a, b) if Rational.respond_to? :Rational
+  # fallback
+  return a / Float(b)
+end
+
 
 describe Exiv2 do
 
@@ -40,13 +51,19 @@ describe Exiv2 do
       @iptc_data = image.iptc_data
     end
 
+    it "should return IPTC time values as ruby time objects" do
+      @iptc_data['Iptc.Application2.ReleaseDate'].should be_kind_of(Time)
+      @iptc_data['Iptc.Application2.ReleaseTime'].should be_kind_of(Time)
+    end
+    
     it "should read IPTC data" do
       @iptc_data.should be_a(Exiv2::IptcData)
-      @iptc_data.inspect.should == '#<Exiv2::IptcData: {"Iptc.Application2.Caption"=>"Rhubarb rhubarb rhubard", "Iptc.Application2.Keywords"=>["fish", "custard"]}>'
       @iptc_data.to_a.should == [
         ["Iptc.Application2.Caption", "Rhubarb rhubarb rhubard"],
         ["Iptc.Application2.Keywords", "fish"],
-        ["Iptc.Application2.Keywords", "custard"]
+        ["Iptc.Application2.Keywords", "custard"],
+        ["Iptc.Application2.ReleaseDate", Time.utc(2412, 12, 6)],
+        ["Iptc.Application2.ReleaseTime", Time.utc(1970, 1, 1, 11, 11, 11)],
       ]
     end
 
@@ -55,7 +72,9 @@ describe Exiv2 do
       iptc_hash.should be_a(Hash)
       iptc_hash.should == {
         "Iptc.Application2.Caption"  => "Rhubarb rhubarb rhubard",
-        "Iptc.Application2.Keywords" => ["fish", "custard"]
+        "Iptc.Application2.Keywords" => ["fish", "custard"],
+        "Iptc.Application2.ReleaseDate" => Time.utc(2412, 12, 6),
+        "Iptc.Application2.ReleaseTime" => Time.utc(1970, 1, 1, 11, 11, 11),
       }
     end
     
@@ -65,7 +84,9 @@ describe Exiv2 do
         ["Iptc.Application2.Caption", "Rhubarb rhubarb rhubard"],
         ["Iptc.Application2.Keywords", "fish"],
         ["Iptc.Application2.Keywords", "custard"],
-        ["Iptc.Application2.Keywords", "fishy"]
+        ["Iptc.Application2.ReleaseDate", Time.utc(2412, 12, 6)],
+        ["Iptc.Application2.ReleaseTime", Time.utc(1970, 1, 1, 11, 11, 11)],
+        ["Iptc.Application2.Keywords", "fishy"],
       ]
     end
     
@@ -145,15 +166,20 @@ describe Exiv2 do
       @exif_data = image.exif_data
     end
 
+    it "should return rationals" do
+      @exif_data["Exif.GPSInfo.GPSLatitude"][0].should be_a(Rational)
+    end
+    
     it "should read Exif data" do
       @exif_data.should be_a(Exiv2::ExifData)
-      @exif_data.inspect.should == '#<Exiv2::ExifData: {"Exif.Image.ExifTag"=>"52", "Exif.Image.Software"=>"plasq skitch", "Exif.Photo.ExifVersion"=>"48 50 49 48", "Exif.Photo.PixelXDimension"=>"32", "Exif.Photo.PixelYDimension"=>"32"}>'
       @exif_data.to_a.should == [
         ["Exif.Image.Software",         "plasq skitch"],
-        ["Exif.Image.ExifTag",          "52"],
+        ["Exif.Image.ExifTag",          62],
         ["Exif.Photo.ExifVersion",      "48 50 49 48"],
-        ["Exif.Photo.PixelXDimension",  "32"],
-        ["Exif.Photo.PixelYDimension",  "32"]
+        ["Exif.Photo.PixelXDimension",  32],
+        ["Exif.Photo.PixelYDimension",  32],
+        ["Exif.Image.GPSTag",           104],
+        ["Exif.GPSInfo.GPSLatitude",    [rational(4, 1), rational(22, 1), rational(1, 3)]]
       ]
     end
 
@@ -161,22 +187,26 @@ describe Exiv2 do
       exif_hash = @exif_data.to_hash
       exif_hash.should be_a(Hash)
       exif_hash.should == {
-        "Exif.Photo.PixelXDimension" => "32",
-        "Exif.Photo.ExifVersion"     => "48 50 49 48",
         "Exif.Image.Software"        => "plasq skitch",
-        "Exif.Photo.PixelYDimension" => "32",
-        "Exif.Image.ExifTag"         => "52"
+        "Exif.Image.ExifTag"         => 62,
+        "Exif.Photo.ExifVersion"     => "48 50 49 48",
+        "Exif.Photo.PixelXDimension" => 32,
+        "Exif.Photo.PixelYDimension" => 32,
+        "Exif.Image.GPSTag"          => 104,
+        "Exif.GPSInfo.GPSLatitude"   => [rational(4, 1), rational(22, 1), rational(1, 3)]
       }
     end
 
     it "should write Exif data" do
       @exif_data.add("Exif.Image.Software", "ruby-exiv2")
       @exif_data.to_hash.should == {
-        "Exif.Photo.PixelXDimension" => "32",
-        "Exif.Photo.ExifVersion"     => "48 50 49 48",
         "Exif.Image.Software"        => ["plasq skitch", "ruby-exiv2"],
-        "Exif.Photo.PixelYDimension" => "32",
-        "Exif.Image.ExifTag"         => "52"
+        "Exif.Image.ExifTag"         => 62,
+        "Exif.Photo.ExifVersion"     => "48 50 49 48",
+        "Exif.Photo.PixelXDimension" => 32,
+        "Exif.Photo.PixelYDimension" => 32,
+        "Exif.Image.GPSTag"          => 104,
+        "Exif.GPSInfo.GPSLatitude"   => [rational(4, 1), rational(22, 1), rational(1, 3)]
       }
     end
     
@@ -202,3 +232,4 @@ describe Exiv2 do
     end
   end
 end
+

@@ -19,6 +19,105 @@ static std::string to_std_string(VALUE string) {
   return std::string(RSTRING_PTR(string), RSTRING_LEN(string));
 }
 
+// Convert multiple long values to an array of ruby nums
+static VALUE multiple_long_to_ruby(const Exiv2::Value& value) {
+  // empty value
+  if(value.count() <= 0) {
+    return Qnil;
+  }
+  
+  if(value.count() == 1) {
+    return INT2NUM(value.toLong(0));
+  }
+  
+  VALUE values = rb_ary_new2(value.count());
+  for(int i = 0; i < value.count(); i++) {
+    rb_ary_store(values, i, INT2NUM(value.toLong(i)));
+  }
+  return values;
+}
+
+// Convert a single rational to ruby rational
+static VALUE rational_to_ruby(const Exiv2::Value& value, long pos = 0) {
+  Exiv2::Rational r = value.toRational(pos);
+    
+  // Rational must be definied/loaded
+  ID rationalId = rb_intern("Rational");
+  if(rb_const_defined(rb_cObject, rationalId)) {
+    
+    // Ruby 1.8 Rational.new
+    VALUE rational = rb_const_get(rb_cObject, rationalId);
+    if(rb_respond_to(rational, rb_intern("new!"))) {
+      return rb_funcall(rational, rb_intern("new!"), 2, INT2NUM(r.first), INT2NUM(r.second));
+    }
+    
+    // Ruby 1.9+ Rational method
+    // TODO: find a usable check for Rational method
+    return rb_funcall(rb_cObject, rb_intern("Rational"), 2, INT2NUM(r.first), INT2NUM(r.second));
+  }
+  
+  // fallback: rational as float
+  return rb_float_new((double) r.first/(double) r.second);
+}
+
+// Convert multiple rationals to a ruby array of rationals
+static VALUE multiple_rational_to_ruby(const Exiv2::Value& value) {
+  // empty value
+  if(value.count() <= 0) {
+    return Qnil;
+  }
+  
+  if(value.count() == 1) {
+    return rational_to_ruby(value);
+  }
+  
+  VALUE values = rb_ary_new2(value.count());
+  for(int i = 0; i < value.count(); i++) {
+    rb_ary_store(values, i, rational_to_ruby(value, i));
+  }
+  return values;
+}
+
+// Convert a exiv2 value to ruby object based on exiv2 value type
+static VALUE value_to_ruby(const Exiv2::Value& value) {
+  Exiv2::TypeId typeId = value.typeId();
+  switch(typeId) {
+    case Exiv2::invalidTypeId: {
+      return Qnil;
+    }
+    case Exiv2::unsignedByte:
+    case Exiv2::unsignedShort:
+    case Exiv2::unsignedLong:
+    case Exiv2::signedByte:
+    case Exiv2::signedShort:
+    case Exiv2::signedLong:
+    case Exiv2::tiffFloat:
+    case Exiv2::tiffDouble:
+    case Exiv2::tiffIfd: {
+      return multiple_long_to_ruby(value);
+    }
+    case Exiv2::unsignedRational:
+    case Exiv2::signedRational: {
+      return multiple_rational_to_ruby(value);
+    }
+    case Exiv2::date: {
+      Exiv2::DateValue *date_value = dynamic_cast<Exiv2::DateValue *>(const_cast<Exiv2::Value *>(&value));
+      if(!date_value) return Qnil;
+      Exiv2::DateValue::Date date = date_value->getDate();
+      return rb_funcall(rb_cTime, rb_intern("utc"), 3, INT2FIX(date.year), INT2FIX(date.month), INT2FIX(date.day));
+    }
+    case Exiv2::time: {
+      Exiv2::TimeValue *time_value = dynamic_cast<Exiv2::TimeValue *>(const_cast<Exiv2::Value *>(&value));
+      if(!time_value) return Qnil;
+      Exiv2::TimeValue::Time time = time_value->getTime();
+      return rb_funcall(rb_cTime, rb_intern("utc"), 6, INT2FIX(1970), INT2FIX(1), INT2FIX(1), INT2FIX(time.hour+time.tzHour), INT2FIX(time.minute+time.tzMinute), INT2FIX(time.second));
+    }
+  }
+  
+  // everything else will be returned as string
+  return to_ruby_string(value.toString());
+}
+
 // Shared method for implementing each on XmpData, IptcData and ExifData.
 template <class T>
 static VALUE metadata_each(VALUE self) {
@@ -27,7 +126,7 @@ static VALUE metadata_each(VALUE self) {
 
   for(typename T::iterator i = data->begin(); i != data->end(); i++) {
     VALUE key   = to_ruby_string(i->key());
-    VALUE value = to_ruby_string(i->value().toString());
+    VALUE value = value_to_ruby(i->value());
     rb_yield(rb_ary_new3(2, key, value));
   }
 

@@ -139,10 +139,61 @@ static VALUE value_to_ruby(const Exiv2::Value& value) {
       }
       return langAlt;
     }
+    default: {
+      // everything else will be returned as string
+      return to_ruby_string(value.toString());
+    }
   }
+}
 
-  // everything else will be returned as string
-  return to_ruby_string(value.toString());
+// Convert a exiv2 value to ruby object based on exiv2 value type
+static VALUE default_value_for_type_to_ruby(Exiv2::TypeId typeId) {
+  switch(typeId) {
+    case Exiv2::invalidTypeId: {
+      return Qnil;
+    }
+    case Exiv2::unsignedByte:
+    case Exiv2::unsignedShort:
+    case Exiv2::unsignedLong:
+    case Exiv2::signedByte:
+    case Exiv2::signedShort:
+    case Exiv2::signedLong:
+    case Exiv2::tiffFloat:
+    case Exiv2::tiffDouble:
+    case Exiv2::tiffIfd: {
+      return NUM2LONG(0);
+    }
+    case Exiv2::unsignedRational:
+    case Exiv2::signedRational: {
+      // Rational must be definied/loaded
+      ID rationalId = rb_intern("Rational");
+      if(rb_const_defined(rb_cObject, rationalId)) {
+
+        // Ruby 1.8 Rational.new
+        VALUE rational = rb_const_get(rb_cObject, rationalId);
+        if(rb_respond_to(rational, rb_intern("new!"))) {
+          return rb_funcall(rational, rb_intern("new!"), 2, INT2NUM(0), INT2NUM(0));
+        }
+
+        // Ruby 1.9+ Rational method
+        // TODO: find a usable check for Rational method
+        return rb_funcall(rb_cObject, rb_intern("Rational"), 2, INT2NUM(0), INT2NUM(0));
+      }
+
+      // fallback: rational as float
+      return rb_float_new(0);
+    }
+    case Exiv2::xmpBag:
+    case Exiv2::xmpSeq: {
+      return rb_ary_new2(0);
+    }
+    case Exiv2::langAlt: {
+      return rb_hash_new();
+    }
+    default: {
+      return Qnil;
+    }
+  }
 }
 
 // Store ruby value in given exiv2 container
@@ -220,16 +271,19 @@ extern "C" {
 
   static VALUE exif_data_class;
   static VALUE exif_data_each(VALUE self);
+  static VALUE exif_data_get(VALUE self, VALUE key);
   static VALUE exif_data_add(VALUE self, VALUE key, VALUE value);
   static VALUE exif_data_delete(VALUE self, VALUE key);
 
   static VALUE iptc_data_class;
   static VALUE iptc_data_each(VALUE self);
+  static VALUE iptc_data_get(VALUE self, VALUE key);
   static VALUE iptc_data_add(VALUE self, VALUE key, VALUE value);
   static VALUE iptc_data_delete(VALUE self, VALUE key);
 
   static VALUE xmp_data_class;
   static VALUE xmp_data_each(VALUE self);
+  static VALUE xmp_data_get(VALUE self, VALUE key);
   static VALUE xmp_data_add(VALUE self, VALUE key, VALUE value);
   static VALUE xmp_data_delete(VALUE self, VALUE key);
 
@@ -253,18 +307,21 @@ extern "C" {
     exif_data_class = rb_define_class_under(exiv2_module, "ExifData", rb_cObject);
     rb_include_module(exif_data_class, enumerable_module);
     rb_define_method(exif_data_class, "each", (Method)exif_data_each, 0);
+    rb_define_method(exif_data_class, "get", (Method)exif_data_get, 1);
     rb_define_method(exif_data_class, "add", (Method)exif_data_add, 2);
     rb_define_method(exif_data_class, "delete", (Method)exif_data_delete, 1);
 
     iptc_data_class = rb_define_class_under(exiv2_module, "IptcData", rb_cObject);
     rb_include_module(iptc_data_class, enumerable_module);
     rb_define_method(iptc_data_class, "each", (Method)iptc_data_each, 0);
+    rb_define_method(iptc_data_class, "get", (Method)iptc_data_get, 1);
     rb_define_method(iptc_data_class, "add", (Method)iptc_data_add, 2);
     rb_define_method(iptc_data_class, "delete", (Method)iptc_data_delete, 1);
 
     xmp_data_class = rb_define_class_under(exiv2_module, "XmpData", rb_cObject);
     rb_include_module(xmp_data_class, enumerable_module);
     rb_define_method(xmp_data_class, "each", (Method)xmp_data_each, 0);
+    rb_define_method(xmp_data_class, "get", (Method)xmp_data_get, 1);
     rb_define_method(xmp_data_class, "add", (Method)xmp_data_add, 2);
     rb_define_method(xmp_data_class, "delete", (Method)xmp_data_delete, 1);
   }
@@ -357,6 +414,18 @@ extern "C" {
     return metadata_each<Exiv2::ExifData>(self);
   }
 
+  static VALUE exif_data_get(VALUE self, VALUE key) {
+    Exiv2::ExifData* data;
+    Data_Get_Struct(self, Exiv2::ExifData, data);
+
+    Exiv2::ExifKey exifKey = Exiv2::ExifKey(to_std_string(key));
+    Exiv2::ExifData::iterator pos = data->findKey(exifKey);
+    if(pos == data->end()) return Qfalse;
+    Exiv2::Value* val = pos->getValue().release();
+    if(!val) return Qnil;
+    return value_to_ruby(*val);
+  }
+
   static VALUE exif_data_add(VALUE self, VALUE key, VALUE value) {
     Exiv2::ExifData* data;
     Data_Get_Struct(self, Exiv2::ExifData, data);
@@ -387,8 +456,15 @@ extern "C" {
     Data_Get_Struct(self, Exiv2::ExifData, data);
 
     Exiv2::ExifKey exifKey = Exiv2::ExifKey(to_std_string(key));
+
+#if EXIV2_MAJOR_VERSION <= 0 && EXIV2_MINOR_VERSION <= 20
+    Exiv2::TypeId typeId = Exiv2::ExifTags::tagType(exifKey.tag(), exifKey.ifdId());
+#else
+    Exiv2::TypeId typeId = exifKey.defaultTypeId();
+#endif
+
     Exiv2::ExifData::iterator pos = data->findKey(exifKey);
-    if(pos == data->end()) return Qfalse;
+    if(pos == data->end()) return default_value_for_type_to_ruby(typeId);
     data->erase(pos);
 
     return Qtrue;
@@ -433,6 +509,19 @@ extern "C" {
     return Qfalse;
   }
 
+  static VALUE iptc_data_get(VALUE self, VALUE key) {
+    Exiv2::IptcData* data;
+    Data_Get_Struct(self, Exiv2::IptcData, data);
+
+    Exiv2::IptcKey iptcKey = Exiv2::IptcKey(to_std_string(key));
+    bool repeatable        = Exiv2::IptcDataSets::dataSetRepeatable(iptcKey.tag(), iptcKey.record());
+    Exiv2::IptcData::iterator pos = data->findKey(iptcKey);
+    if(pos == data->end()) return repeatable ? rb_ary_new() : Qnil;
+    Exiv2::Value* val = pos->getValue().release();
+    if(!val) return Qnil;
+    return value_to_ruby(*val);
+  }
+
   static VALUE iptc_data_delete(VALUE self, VALUE key) {
     Exiv2::IptcData* data;
     Data_Get_Struct(self, Exiv2::IptcData, data);
@@ -465,6 +554,19 @@ extern "C" {
       return Qtrue;
     }
     return Qfalse;
+  }
+
+  static VALUE xmp_data_get(VALUE self, VALUE key) {
+    Exiv2::XmpData* data;
+    Data_Get_Struct(self, Exiv2::XmpData, data);
+
+    Exiv2::XmpKey xmpKey = Exiv2::XmpKey(to_std_string(key));
+    Exiv2::TypeId typeId = Exiv2::XmpProperties::propertyType(xmpKey);
+    Exiv2::XmpData::iterator pos = data->findKey(xmpKey);
+    if(pos == data->end()) return default_value_for_type_to_ruby(typeId);
+    Exiv2::Value* val = pos->getValue().release();
+    if(!val) return Qnil;
+    return value_to_ruby(*val);
   }
 
   static VALUE xmp_data_delete(VALUE self, VALUE key) {

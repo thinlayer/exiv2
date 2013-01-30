@@ -26,7 +26,7 @@ module SharedMethods
   end
 
   def [](key)
-    self.to_hash[key]
+    self.get(key)
   end
 
   def []=(key, value)

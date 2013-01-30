@@ -146,56 +146,6 @@ static VALUE value_to_ruby(const Exiv2::Value& value) {
   }
 }
 
-// Convert a exiv2 value to ruby object based on exiv2 value type
-static VALUE default_value_for_type_to_ruby(Exiv2::TypeId typeId) {
-  switch(typeId) {
-    case Exiv2::invalidTypeId: {
-      return Qnil;
-    }
-    case Exiv2::unsignedByte:
-    case Exiv2::unsignedShort:
-    case Exiv2::unsignedLong:
-    case Exiv2::signedByte:
-    case Exiv2::signedShort:
-    case Exiv2::signedLong:
-    case Exiv2::tiffFloat:
-    case Exiv2::tiffDouble:
-    case Exiv2::tiffIfd: {
-      return NUM2LONG(0);
-    }
-    case Exiv2::unsignedRational:
-    case Exiv2::signedRational: {
-      // Rational must be definied/loaded
-      ID rationalId = rb_intern("Rational");
-      if(rb_const_defined(rb_cObject, rationalId)) {
-
-        // Ruby 1.8 Rational.new
-        VALUE rational = rb_const_get(rb_cObject, rationalId);
-        if(rb_respond_to(rational, rb_intern("new!"))) {
-          return rb_funcall(rational, rb_intern("new!"), 2, INT2NUM(0), INT2NUM(0));
-        }
-
-        // Ruby 1.9+ Rational method
-        // TODO: find a usable check for Rational method
-        return rb_funcall(rb_cObject, rb_intern("Rational"), 2, INT2NUM(0), INT2NUM(0));
-      }
-
-      // fallback: rational as float
-      return rb_float_new(0);
-    }
-    case Exiv2::xmpBag:
-    case Exiv2::xmpSeq: {
-      return rb_ary_new2(0);
-    }
-    case Exiv2::langAlt: {
-      return rb_hash_new();
-    }
-    default: {
-      return Qnil;
-    }
-  }
-}
-
 // Store ruby value in given exiv2 container
 static void ruby_to_value(Exiv2::Value* container, VALUE value) {
   Exiv2::TypeId typeId = container->typeId();
@@ -464,7 +414,7 @@ extern "C" {
 #endif
 
     Exiv2::ExifData::iterator pos = data->findKey(exifKey);
-    if(pos == data->end()) return default_value_for_type_to_ruby(typeId);
+    if(pos == data->end()) return Qnil;
     data->erase(pos);
 
     return Qtrue;
@@ -563,7 +513,7 @@ extern "C" {
     Exiv2::XmpKey xmpKey = Exiv2::XmpKey(to_std_string(key));
     Exiv2::TypeId typeId = Exiv2::XmpProperties::propertyType(xmpKey);
     Exiv2::XmpData::iterator pos = data->findKey(xmpKey);
-    if(pos == data->end()) return default_value_for_type_to_ruby(typeId);
+    if(pos == data->end()) return typeId == Exiv2::xmpBag || typeId == Exiv2::xmpSeq ? rb_ary_new() : Qnil;
     Exiv2::Value* val = pos->getValue().release();
     if(!val) return Qnil;
     return value_to_ruby(*val);

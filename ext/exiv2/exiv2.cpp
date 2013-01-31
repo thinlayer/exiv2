@@ -189,9 +189,10 @@ static void ruby_to_value(Exiv2::Value* container, VALUE value) {
     case Exiv2::time: {
 
     }
+    default: {
+      container->read(to_std_string(value));
+    }
   }
-
-  container->read(to_std_string(value));
 }
 
 // Shared method for implementing each on XmpData, IptcData and ExifData.

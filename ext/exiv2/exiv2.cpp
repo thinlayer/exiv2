@@ -146,6 +146,15 @@ static VALUE value_to_ruby(const Exiv2::Value& value) {
   }
 }
 
+static VALUE value_to_ruby_ary(const Exiv2::Value& value) {
+  VALUE v = value_to_ruby(value);
+  if(TYPE(v) == T_ARRAY) return v;
+
+  VALUE ary  = rb_ary_new2(1);
+  rb_ary_store(ary, 0, v);
+  return ary;
+}
+
 // Store ruby value in given exiv2 container
 static void ruby_to_value(Exiv2::Value* container, VALUE value) {
   Exiv2::TypeId typeId = container->typeId();
@@ -469,7 +478,7 @@ extern "C" {
     if(pos == data->end()) return repeatable ? rb_ary_new() : Qnil;
     Exiv2::Value* val = pos->getValue().release();
     if(!val) return Qnil;
-    return value_to_ruby(*val);
+    return repeatable ? value_to_ruby_ary(*val) : value_to_ruby(*val);
   }
 
   static VALUE iptc_data_delete(VALUE self, VALUE key) {

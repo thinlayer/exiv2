@@ -70,36 +70,4 @@ describe Exiv2::IptcData do
     iptc_data.delete_all("Iptc.Application2.Keywords")
     iptc_data.to_hash["Iptc.Application2.Keywords"].should == nil
   end
-
-  context "Iptc.Application2.Keywords" do
-    before do
-      # create a fresh test file
-      img = Pathname.new("spec/files/test.jpg").to_s
-      @test_img = Pathname.new("spec/files/keyword_test.jpg").to_s
-      FileUtils.cp(img, @test_img)
-    end
-
-    after do
-      # remove test file after test
-      FileUtils.rm(@test_img)
-    end
-
-    xit "should support array operations" do
-      img = Exiv2::ImageFactory.open(@test_img)
-      img.read_metadata
-      img.iptc_data["Iptc.Application2.Keywords"] = "aaaa"
-      img.write_metadata
-
-      img = Exiv2::ImageFactory.open(@test_img)
-      img.read_metadata
-      img.iptc_data["Iptc.Application2.Keywords"] << "aaaa"
-      img.iptc_data["Iptc.Application2.Keywords"] += [ "bbbb", "cccc" ]
-      img.iptc_data["Iptc.Application2.Keywords"] -= [ "cccc" ]
-      img.write_metadata
-
-      img = Exiv2::ImageFactory.open(@test_img)
-      img.read_metadata
-      img.iptc_data["Iptc.Application2.Keywords"].should =~ ["aaaa", "bbbb"]
-    end
-  end
 end

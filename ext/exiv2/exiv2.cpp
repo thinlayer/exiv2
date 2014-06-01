@@ -118,7 +118,18 @@ static VALUE value_to_ruby(const Exiv2::Value& value) {
       Exiv2::TimeValue *time_value = dynamic_cast<Exiv2::TimeValue *>(const_cast<Exiv2::Value *>(&value));
       if(!time_value) return Qnil;
       Exiv2::TimeValue::Time time = time_value->getTime();
-      return rb_funcall(rb_cTime, rb_intern("utc"), 6, INT2FIX(1970), INT2FIX(1), INT2FIX(1), INT2FIX(time.hour+time.tzHour), INT2FIX(time.minute+time.tzMinute), INT2FIX(time.second));
+      // maths to handle timezones when creating a time object. time_value returns tzHour & tzMinute as integers.
+      // calculate the int diff after timezone is applied.
+      int time_hour, time_minute;
+      time_hour = (time.hour+time.tzHour);
+      time_minute = (time.minute+time.tzMinute);
+
+      // adjust the values if time int is negative
+      int time_hr, time_min;
+      time_hr = ( (time_hour < 0) ? (24+time_hour) : time_hour);
+      time_min = ( (time_minute < 0) ? (60+time_minute) : time_minute);
+
+      return rb_funcall(rb_cTime, rb_intern("utc"), 6, INT2FIX(1970), INT2FIX(1), INT2FIX(1), INT2FIX(time_hr), INT2FIX(time_min), INT2FIX(time.second));
     }
     case Exiv2::xmpBag:
     case Exiv2::xmpSeq: {
